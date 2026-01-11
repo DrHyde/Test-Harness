@@ -18,11 +18,11 @@ App::Prove - Implements the C<prove> command.
 
 =head1 VERSION
 
-Version 3.44
+Version 3.51_01
 
 =cut
 
-our $VERSION = '3.44';
+our $VERSION = '3.51_01';
 
 =head1 DESCRIPTION
 
@@ -372,13 +372,13 @@ sub _get_args {
         my @rules;
         for ( @{ $self->rules } ) {
             if (/^par=(.*)/) {
-                push @rules, $1;
+                push @rules, { par => $1 };
             }
             elsif (/^seq=(.*)/) {
                 push @rules, { seq => $1 };
             }
         }
-        $args{rules} = { par => [@rules] };
+        $args{rules} = { seq => [@rules] };
     }
     $args{harness_class} = $self->{harness_class} if $self->{harness_class};
 
@@ -403,7 +403,7 @@ sub _find_module {
 }
 
 sub _load_extension {
-    my ( $self, $name, @search ) = @_;
+    my ( $self, $cb, $name, @search ) = @_;
 
     my @args = ();
     if ( $name =~ /^(.*?)=(.*)/ ) {
@@ -412,10 +412,7 @@ sub _load_extension {
     }
 
     if ( my $class = $self->_find_module( $name, @search ) ) {
-        $class->import(@args);
-        if ( $class->can('load') ) {
-            $class->load( { app_prove => $self, args => [@args] } );
-        }
+        $class->$cb(@args);
     }
     else {
         croak "Can't load module $name";
@@ -423,8 +420,8 @@ sub _load_extension {
 }
 
 sub _load_extensions {
-    my ( $self, $ext, @search ) = @_;
-    $self->_load_extension( $_, @search ) for @$ext;
+    my ( $self, $cb, $ext, @search ) = @_;
+    $self->_load_extension( $cb, $_, @search ) for @$ext;
 }
 
 sub _parse_source {
@@ -498,8 +495,16 @@ sub run {
     }
     else {
 
-        $self->_load_extensions( $self->modules );
-        $self->_load_extensions( $self->plugins, PLUGINS );
+        $self->_load_extensions( sub {
+            my ($ext, @args) = @_;
+            $ext->import(@args);
+        }, $self->modules );
+        $self->_load_extensions( sub {
+            my ($ext, @args) = @_;
+            if ( $ext->can('load') ) {
+                $ext->load( { app_prove => $self, args => [@args] } );
+            }
+        }, $self->plugins, PLUGINS );
 
         local $ENV{TEST_VERBOSE} = 1 if $self->verbose;
 
@@ -771,17 +776,6 @@ along with a reference to the C<App::Prove> object that is invoking your plugin:
       $p->{app_prove}->do_something;
       ...
   }
-
-Note that the user's arguments are also passed to your plugin's C<import()>
-function as a list, eg:
-
-  sub import {
-      my ($class, @args) = @_;
-      # @args will contain ( 'foo', 'bar', 'baz' )
-      ...
-  }
-
-This is for backwards compatibility, and may be deprecated in the future.
 
 =head2 Sample Plugin
 
